@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:vm="http://www.mulesoft.org/schema/mule/vm" xmlns:scripting="http://www.mulesoft.org/schema/mule/scripting"
+	xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" version="EE-3.5.0"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.mulesoft.org/schema/mule/scripting http://www.mulesoft.org/schema/mule/scripting/current/mule-scripting.xsd
+http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd
+http://www.mulesoft.org/schema/mule/vm http://www.mulesoft.org/schema/mule/vm/current/mule-vm.xsd">
+    
+    <flow name="rac_demoFlow1" doc:name="rac_demoFlow1">
+        <http:inbound-endpoint exchange-pattern="request-response" host="localhost" port="${http.port}" doc:name="HTTP" path="rac"/>
+        <logger message="ID: #[message.id] - Payload: #[payload]" level="INFO" doc:name="Logger Payload"/>
+        <logger message="ID: #[message.id] - My secure properties: [USER is ${secure.user}] [PASS is ${secure.pass}] - Unsecure property: [UNSECURE is ${unsecure}]" level="INFO" doc:name="Logger Secure Property"/>
+        <choice doc:name="Choice">
+            <when expression="#[message.inboundProperties['order_amount'] &gt;= 5000]">
+                <tracking:custom-event event-name="orderAmount" doc:name="Order Amount Event">
+                    <tracking:meta-data key="orderAmount" value="#[message.inboundProperties['order_amount']]"/>
+                    <tracking:meta-data key="messageId" value="#[message.id]"/>
+                    <tracking:meta-data key="timestamp" value="#[server.dateTime]"/>
+                </tracking:custom-event>
+            </when>
+            <when expression="#[message.inboundProperties['order_amount'] == null]">
+                <scripting:component doc:name="Script to throw error">
+				    <scripting:script engine="Groovy"><![CDATA[
+				        throw new IllegalArgumentException('fake exception!')
+				    ]]></scripting:script>
+				</scripting:component>
+            </when>            
+            <otherwise>
+                <logger message="ID: #[message.id] - No event triggered for messageId: #[message.id]" level="INFO" doc:name="Logger"/>
+            </otherwise>
+        </choice>
+        <set-payload value="Your order with amount: #[message.inboundProperties['order_amount']] was received." doc:name="Set Payload"/>
+        <vm:outbound-endpoint exchange-pattern="one-way"  doc:name="VM Async process" path="async"/>
+        <catch-exception-strategy doc:name="Catch Exception Strategy">
+            <logger message="ID: #[message.id] - Error for Payload #[payload] - Exception: #[exception.cause]" level="ERROR" doc:name="Logger Exception"/>
+            <tracking:custom-event event-name="exceptionEvent" doc:name="Exception event">
+                <tracking:meta-data key="messageId" value="#[message.id]"/>
+                <tracking:meta-data key="status" value="ERROR"/>
+                <tracking:meta-data key="payload" value="#[payload]"/>
+                <tracking:meta-data key="exception" value="#[exception.cause]"/>
+            </tracking:custom-event>
+            <set-payload value="#['Unexpected error :(']" doc:name="Set Payload"/>
+        </catch-exception-strategy>
+    </flow>
+    <flow name="rac_demoFlow2" doc:name="rac_demoFlow2">
+        <vm:inbound-endpoint exchange-pattern="one-way" path="async" doc:name="VM Async process"/>
+        <logger message="ID: #[message.id] - Async processing payload: #[payload]" level="INFO" doc:name="Logger More"/>
+        <tracking:custom-event event-name="asyncEvent" doc:name="Async event">
+            <tracking:meta-data key="messageId" value="#[message.id]"/>
+            <tracking:meta-data key="payload" value="#[payload]"/>
+            <tracking:meta-data key="timeStamp" value="#[server.dateTime]"/>
+        </tracking:custom-event>
+    </flow>
+</mule>
